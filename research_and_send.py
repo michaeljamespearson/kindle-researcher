@@ -73,65 +73,86 @@ def mark_done(sheet, row_index, pdf_date):
 
 # ── Claude Research ──────────────────────────────────────────────────────────
 
-RESEARCH_SYSTEM_PROMPT = """You are a technical research writer producing Kindle-readable deep dives.
-
-Your audience: a software engineer with experience in AI/ML, security, and distributed systems.
-
-OUTPUT FORMAT — respond with valid JSON only, no markdown fences:
-{
-  "title": "Article title",
-  "subtitle": "One-line subtitle",
-  "sections": [
-    {
-      "heading": "Section Heading",
-      "body": "Paragraph text. Use <b>bold</b> and <i>italic</i> for emphasis. Multiple paragraphs separated by \\n\\n."
-    }
-  ],
-  "key_takeaways": ["takeaway 1", "takeaway 2", "takeaway 3"],
-  "further_reading": ["resource 1", "resource 2"]
-}
-
-REQUIREMENTS:
-- Target 2,000–2,500 words total body text (roughly a 15-minute technical read).
-- 5–7 sections covering: conceptual foundation, how it works technically, 
-  current state of the art, practical applications, limitations/open problems, 
-  and where things are headed.
-- Write at a technical depth appropriate for someone who can read papers but 
-  wants an efficient synthesis, not a textbook chapter.
-- Use concrete examples, real system names, and specific numbers where possible.
-- Be opinionated — flag what matters and what's overhyped.
-- Do NOT include any markdown formatting. Only use <b> and <i> HTML tags for emphasis.
-"""
-
 
 def research_topic(topic, notes=""):
-    """Call Claude with web search to research a topic and return structured JSON."""
+    """
+    Two-step approach:
+    1. Claude + web search produces a raw research writeup (plain text).
+    2. A second Claude call (no tools) structures it into clean JSON.
+
+    This avoids the fragile pattern of asking a tool-use call to output JSON,
+    which breaks when web search fragments the response.
+    """
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    user_prompt = f"Research this topic in depth: {topic}"
+    # ── Step 1: Research with web search (plain text output) ─────────────
+    research_prompt = f"Research this topic in depth: {topic}"
     if notes:
-        user_prompt += f"\n\nAdditional context/angle: {notes}"
+        research_prompt += f"\n\nAdditional context/angle: {notes}"
 
-    response = client.messages.create(
+    research_system = """You are a technical research writer. Your audience is a software engineer
+with experience in AI/ML, security, and distributed systems.
+
+Write a detailed technical article (~2,000-2,500 words) with 5-7 sections covering:
+conceptual foundation, how it works technically, current state of the art,
+practical applications, limitations/open problems, and where things are headed.
+
+Use web search to find current, accurate information. Cite specific systems,
+papers, numbers, and benchmarks. Be opinionated - flag what matters and what is overhyped.
+
+Output the article as plain text with clear section headings. Use **bold** and *italic*
+for emphasis. End with 3-4 key takeaways and a further reading list."""
+
+    print("  Step 1: Researching with web search...")
+    research_response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=4096,
-        system=RESEARCH_SYSTEM_PROMPT,
+        max_tokens=8192,
+        system=research_system,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        messages=[{"role": "user", "content": user_prompt}],
+        messages=[{"role": "user", "content": research_prompt}],
     )
 
-    # Extract text from response (may have multiple content blocks due to tool use)
-    text_parts = [block.text for block in response.content if block.type == "text"]
-    raw_text = "\n".join(text_parts).strip()
+    raw_article = "\n".join(
+        block.text for block in research_response.content if block.type == "text"
+    ).strip()
+    print(f"  Step 1 complete: {len(raw_article)} chars of raw research")
 
-    # Clean potential markdown fences
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("\n", 1)[1]
-    if raw_text.endswith("```"):
-        raw_text = raw_text.rsplit("```", 1)[0]
-    raw_text = raw_text.strip()
+    # ── Step 2: Structure into JSON (no tools, clean output) ─────────────
+    print("  Step 2: Structuring into JSON...")
+    structure_response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=8192,
+        system="""Convert the provided article into a JSON object. Output ONLY valid JSON, nothing else.
+No markdown fences, no preamble, no commentary. Just the raw JSON object.
 
-    return json.loads(raw_text)
+Convert **bold** to <b>bold</b> and *italic* to <i>italic</i> in the body text.
+Use \\n\\n to separate paragraphs within a section body.
+
+Required schema:
+{
+  "title": "string",
+  "subtitle": "string (one-line summary)",
+  "sections": [
+    {"heading": "string", "body": "string (paragraphs separated by \\n\\n, HTML <b>/<i> for emphasis)"}
+  ],
+  "key_takeaways": ["string", ...],
+  "further_reading": ["string", ...]
+}""",
+        messages=[{"role": "user", "content": raw_article}],
+    )
+
+    raw_json = structure_response.content[0].text.strip()
+
+    # Clean markdown fences if present despite instructions
+    if raw_json.startswith("```"):
+        raw_json = raw_json.split("\n", 1)[1]
+    if raw_json.endswith("```"):
+        raw_json = raw_json.rsplit("```", 1)[0]
+    raw_json = raw_json.strip()
+
+    result = json.loads(raw_json)
+    print(f"  Step 2 complete: {result['title']} ({len(result['sections'])} sections)")
+    return result
 
 
 # ── PDF Generation ───────────────────────────────────────────────────────────
