@@ -9,6 +9,7 @@ generates a Kindle-friendly PDF, and emails it to your Kindle device.
 import os
 import sys
 import json
+import time
 import smtplib
 import datetime
 from email.mime.multipart import MIMEMultipart
@@ -73,6 +74,24 @@ def mark_done(sheet, row_index, pdf_date):
 
 # ── Claude Research ──────────────────────────────────────────────────────────
 
+RESEARCH_MODEL = "claude-haiku-4-5-20251001"
+STRUCTURE_MODEL = "claude-haiku-4-5-20251001"
+MAX_RETRIES = 5
+BASE_WAIT = 60  # seconds — rate limit resets per minute
+
+
+def _call_with_retry(client, **kwargs):
+    """Call client.messages.create with exponential backoff on rate limits."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return client.messages.create(**kwargs)
+        except anthropic.RateLimitError as e:
+            if attempt == MAX_RETRIES:
+                raise
+            wait = BASE_WAIT * attempt
+            print(f"  Rate limited (attempt {attempt}/{MAX_RETRIES}), waiting {wait}s...")
+            time.sleep(wait)
+
 
 def research_topic(topic, notes=""):
     """
@@ -80,8 +99,8 @@ def research_topic(topic, notes=""):
     1. Claude + web search produces a raw research writeup (plain text).
     2. A second Claude call (no tools) structures it into clean JSON.
 
-    This avoids the fragile pattern of asking a tool-use call to output JSON,
-    which breaks when web search fragments the response.
+    Uses Haiku for cost efficiency and lower rate limit pressure.
+    Retries with backoff on 429s.
     """
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -104,8 +123,9 @@ Output the article as plain text with clear section headings. Use **bold** and *
 for emphasis. End with 3-4 key takeaways and a further reading list."""
 
     print("  Step 1: Researching with web search...")
-    research_response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    research_response = _call_with_retry(
+        client,
+        model=RESEARCH_MODEL,
         max_tokens=8192,
         system=research_system,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
@@ -117,10 +137,15 @@ for emphasis. End with 3-4 key takeaways and a further reading list."""
     ).strip()
     print(f"  Step 1 complete: {len(raw_article)} chars of raw research")
 
+    # Wait between calls to avoid back-to-back rate limit hits
+    print("  Cooling down 30s before step 2...")
+    time.sleep(30)
+
     # ── Step 2: Structure into JSON (no tools, clean output) ─────────────
     print("  Step 2: Structuring into JSON...")
-    structure_response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    structure_response = _call_with_retry(
+        client,
+        model=STRUCTURE_MODEL,
         max_tokens=8192,
         system="""Convert the provided article into a JSON object. Output ONLY valid JSON, nothing else.
 No markdown fences, no preamble, no commentary. Just the raw JSON object.
