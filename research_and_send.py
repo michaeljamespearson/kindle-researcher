@@ -110,7 +110,8 @@ def research_topic(topic, notes=""):
         research_prompt += f"\n\nAdditional context/angle: {notes}"
 
     research_system = """You are a technical research writer. Your audience is a software engineer
-with experience in AI/ML, security, and distributed systems.
+with experience in AI/ML, security, and distributed systems. 
+Your output should be to someone who has a base understanding of AI / ML but any specific concepts should be spelled out before introducing and using them.
 
 Write a detailed technical article (~2,000-2,500 words) with 5-7 sections covering:
 conceptual foundation, how it works technically, current state of the art,
@@ -118,6 +119,8 @@ practical applications, limitations/open problems, and where things are headed.
 
 Use web search to find current, accurate information. Cite specific systems,
 papers, numbers, and benchmarks. Be opinionated - flag what matters and what is overhyped.
+
+Your paper should have a clear logical flow and should build on itself.
 
 Output the article as plain text with clear section headings. Use **bold** and *italic*
 for emphasis. End with 3-4 key takeaways and a further reading list."""
