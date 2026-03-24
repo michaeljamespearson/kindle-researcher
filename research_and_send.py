@@ -110,8 +110,7 @@ def research_topic(topic, notes=""):
         research_prompt += f"\n\nAdditional context/angle: {notes}"
 
     research_system = """You are a technical research writer. Your audience is a software engineer
-with experience in AI/ML, security, and distributed systems. 
-Your output should be to someone who has a base understanding of AI / ML but any specific concepts should be spelled out before introducing and using them.
+with experience in AI/ML, security, and distributed systems.
 
 Write a detailed technical article (~2,000-2,500 words) with 5-7 sections covering:
 conceptual foundation, how it works technically, current state of the art,
@@ -119,8 +118,6 @@ practical applications, limitations/open problems, and where things are headed.
 
 Use web search to find current, accurate information. Cite specific systems,
 papers, numbers, and benchmarks. Be opinionated - flag what matters and what is overhyped.
-
-Your paper should have a clear logical flow and should build on itself.
 
 Output the article as plain text with clear section headings. Use **bold** and *italic*
 for emphasis. End with 3-4 key takeaways and a further reading list."""
@@ -355,11 +352,11 @@ def main():
     research = research_topic(topic, notes)
     print(f"Article: {research['title']} ({len(research['sections'])} sections)")
 
-    # 3. Generate PDF
-    safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in topic)
-    safe_name = safe_name.strip().replace(" ", "_")[:60]
+    # 3. Generate PDF — use the article title as a clean, readable filename
+    safe_title = "".join(c if c.isalnum() or c == " " else "" for c in research["title"])
+    safe_title = " ".join(safe_title.split())[:60]
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    pdf_path = f"/tmp/{today_str}_{safe_name}.pdf"
+    pdf_path = f"/tmp/{safe_title}.pdf"
     build_kindle_pdf(research, pdf_path)
 
     # 4. Send to Kindle
